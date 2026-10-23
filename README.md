@@ -39,8 +39,6 @@ Continuous diffusion models have emerged as a promising non-autoregressive parad
 
 ## 📑 Todo List
 
-- [x] Release technical report
-- [ ] Release arXiv paper
 - [ ] Release inference code
 - [ ] Release LLaCO-8B checkpoint
 - [ ] Release training code
