@@ -17,9 +17,8 @@ Shuchen Weng
 
 <sup>\*</sup>Equal contribution
 
-<a href="./LLaCO_Technical_Report.pdf"><img src="https://img.shields.io/badge/Paper-Technical%20Report-A42C25.svg" alt="Paper"></a>
+<a href="https://arxiv.org/abs/2610.32604"><img src="https://img.shields.io/badge/arXiv-2610.32604-b31b1b.svg" alt="arXiv"></a>
 <a href="https://escapistmost.github.io/LLaCO/"><img src="https://img.shields.io/badge/Project-Page-0A66C2.svg" alt="Project Page"></a>
-<img src="https://img.shields.io/badge/arXiv-Coming%20Soon-lightgrey.svg" alt="arXiv">
 <img src="https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Coming%20Soon-lightgrey" alt="Hugging Face">
 
 </div>
@@ -35,6 +34,7 @@ Continuous diffusion models have emerged as a promising non-autoregressive parad
 </details>
 
 ## 💡 News
+- 2026.10.27 Paper released on [arXiv](https://arxiv.org/abs/2610.32604)!
 - 2026.10.23 Release Project Page and Technical Report!
 
 ## 📑 Todo List
@@ -57,4 +57,11 @@ Coming soon.
 
 ## Citation
 
-Coming soon.
+```bibtex
+@article{jia2026llaco,
+  title   = {LLaCO: Continuous Diffusion for Large Language Models with Competition-Aware Semantic Scheduling},
+  author  = {Jia, Zijian and Zhang, Peixuan and Li, Genying and Wu, Di and Fu, Yujie and Li, Si and Shi, Boxin and Weng, Shuchen},
+  journal = {arXiv preprint arXiv:2610.32604},
+  year    = {2026}
+}
+```
