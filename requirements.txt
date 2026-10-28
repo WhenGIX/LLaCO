@@ -1,8 +1,3 @@
-# Python 3.12, Linux x86_64. Install PyTorch separately; torch is intentionally
-# omitted so the user can choose the CUDA build matching the driver.
-
-# Native Bridge runtime dependencies. The vendored source is registered by
-# scripts/setup_env.sh; it is not installed from PyPI.
 transformers==5.12.1
 mistral-common>=1.10.0
 peft>=0.18.0
@@ -30,8 +25,6 @@ ninja>=1.11.0
 math-verify==0.9.0
 latex2sympy2-extended==1.11.0
 
-# Optional CUDA extensions used by the native Bridge stack. Install these from
-# PyPI or build them locally for the target CUDA/PyTorch combination.
 transformer-engine==1.13.0
 transformer-engine-cu12==1.13.0
 transformer-engine-torch==1.13.0
