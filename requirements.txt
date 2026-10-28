@@ -20,6 +20,8 @@ pandas>=2.2.0
 pyarrow>=14.0.0
 packaging>=24.2
 ninja>=1.11.0
+math-verify==0.9.0
+latex2sympy2-extended==1.11.0
 transformer-engine==1.13.0
 transformer-engine-cu12==1.13.0
 transformer-engine-torch==1.13.0
