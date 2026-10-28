@@ -34,26 +34,92 @@ Continuous diffusion models have emerged as a promising non-autoregressive parad
 </details>
 
 ## 💡 News
-- 2026.10.27 Paper released on [arXiv](https://arxiv.org/abs/2610.32604)!
-- 2026.10.23 Release Project Page and Technical Report!
+
+- 2026.10.28 [LLaCO-8B checkpoint](https://huggingface.co/escapist413/LLaCO-8B), inference code, and training code released.
+- 2026.10.27 Paper released on [arXiv](https://arxiv.org/abs/2610.32604).
+- 2026.10.23 Project page and technical report released.
 
 ## 📑 Todo List
 
-- [ ] Release inference code
-- [ ] Release LLaCO-8B checkpoint
-- [ ] Release training code
+- [x] Release inference code
+- [x] Release LLaCO-8B checkpoint
+- [x] Release training code
 
 ## 📥 Download
 
-Coming soon.
+Download [**LLaCO-8B**](https://huggingface.co/escapist413/LLaCO-8B) from Hugging Face:
+
+```bash
+hf download escapist413/LLaCO-8B --local-dir checkpoints/LLaCO-8B
+```
 
 ## 🛠️ Installation
 
-Coming soon.
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+
+# PyTorch with CUDA 12.4
+python -m pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 \
+  --index-url https://download.pytorch.org/whl/cu124
+
+bash scripts/setup_env.sh
+source scripts/env.sh
+```
 
 ## 🚀 Inference
 
-Coming soon.
+```bash
+source scripts/env.sh
+
+CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.run \
+  --standalone --nproc_per_node=1 \
+  -m llaco.infer \
+  --checkpoint checkpoints/LLaCO-8B \
+  --tokenizer checkpoints/LLaCO-8B/tokenizer \
+  --prompt 'A bookstore sells notebooks for $4 each. Emma buys 3 notebooks and pays with a $20 bill. How much change should she receive? Show your reasoning and put the final answer in \boxed{}.' \
+  --output outputs/inference.json
+```
+
+## 🏋️ Training
+
+First convert the JSONL conversations in `examples/data/train.jsonl` into the prepared dataset format used by training.
+
+```bash
+source scripts/env.sh
+python scripts/prepare_spherical_data.py \
+  --selection examples/data/selection.json \
+  --output data/prepared/example \
+  --workers 2 \
+  --validation-fraction 0
+```
+
+This creates `data/prepared/example/manifest.json` and the token shards used by the loader. For your own data, replace `examples/data/train.jsonl` and update `data_root` and `glob` in `selection.json`.
+
+Then train from the released LLaCO-8B checkpoint:
+
+```bash
+source scripts/env.sh
+export SPHERICAL_TP_SIZE=4 SPHERICAL_DP_SIZE=2
+
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
+python -m torch.distributed.run --standalone --nproc_per_node=8 \
+  -m llaco.train \
+  --checkpoint checkpoints/LLaCO-8B \
+  --tokenizer checkpoints/LLaCO-8B/tokenizer \
+  --prepared-manifest data/prepared/example/manifest.json \
+  --output-dir outputs/train \
+  --run-name llaco_train \
+  --train-iters 10000 \
+  --panel-interval 500 \
+  --model-only-interval 2000 \
+  checkpoint.save_interval=500
+```
+
+## Acknowledgements
+
+LLaCO is built on [Megatron-Bridge](https://github.com/NVIDIA-NeMo/Megatron-Bridge), and LLaCO-8B is adapted from the pretrained [Nemotron-Labs-Diffusion](https://github.com/NVlabs/Nemotron-Labs-Diffusion) model. We thank the authors for open-sourcing their work.
 
 ## Citation
 
