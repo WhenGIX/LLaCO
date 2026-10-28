@@ -1,0 +1,18 @@
+{
+  "tokenizer_path": "checkpoints/LLaCO-8B/tokenizer",
+  "data_root": "examples/data",
+  "filters": {
+    "context_max_tokens": 1152,
+    "target_max_tokens": 768
+  },
+  "sample_mixture": {
+    "custom": 1.0
+  },
+  "sources": [
+    {
+      "domain": "custom",
+      "glob": "train.jsonl",
+      "assistant_targets": "all"
+    }
+  ]
+}
