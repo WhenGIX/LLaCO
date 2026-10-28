@@ -1,0 +1,126 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Nemotron Nano v2 models
+# Nemotron 3 Nano and Nemotron 3.5 Lightning models
+from megatron.bridge.recipes.nemotronh.gb200 import (
+    nemotron_3_5_lightning_pretrain_8k_config,
+    nemotron_3_5_lightning_pretrain_8k_fsdp_config,
+    nemotron_3_5_lightning_sft_openmathinstruct2_packed_tp1_config,
+    nemotron_3_nano_gb200_pretrain_config,
+    nemotron_3_nano_pretrain_8gpu_gb200_bf16_config,
+    nemotron_3_super_pretrain_64gpu_gb200_bf16_config,
+)
+from megatron.bridge.recipes.nemotronh.nemotron_3_nano import (
+    nemotron_3_5_lightning_peft_config,
+    nemotron_3_5_lightning_pretrain_config,
+    nemotron_3_5_lightning_sft_config,
+    nemotron_3_5_lightning_sft_openmathinstruct2_packed_config,
+    nemotron_3_nano_peft_config,
+    nemotron_3_nano_pretrain_config,
+    nemotron_3_nano_sft_config,
+)
+from megatron.bridge.recipes.nemotronh.nemotron_3_nano_4b import (
+    nemotron_3_nano_4b_peft_config,
+    nemotron_3_nano_4b_pretrain_config,
+    nemotron_3_nano_4b_sft_32k_config,
+    nemotron_3_nano_4b_sft_config,
+)
+
+# Nemotron 3 Super models
+from megatron.bridge.recipes.nemotronh.nemotron_3_super import (
+    nemotron_3_super_peft_config,
+    nemotron_3_super_pretrain_config,
+    nemotron_3_super_sft_config,
+)
+from megatron.bridge.recipes.nemotronh.nemotron_3_ultra import (
+    nemotron_3_ultra_peft_openmathinstruct2_packed_config,
+    nemotron_3_ultra_pretrain_config,
+    nemotron_3_ultra_sft_openmathinstruct2_packed_config,
+)
+from megatron.bridge.recipes.nemotronh.nemotron_nano_v2 import (
+    nemotron_nano_9b_v2_peft_config,
+    nemotron_nano_9b_v2_pretrain_config,
+    nemotron_nano_9b_v2_sft_config,
+    nemotron_nano_12b_v2_peft_config,
+    nemotron_nano_12b_v2_pretrain_config,
+    nemotron_nano_12b_v2_sft_config,
+)
+
+# NemotronH models
+from megatron.bridge.recipes.nemotronh.nemotronh import (
+    nemotronh_4b_peft_config,
+    nemotronh_4b_pretrain_config,
+    nemotronh_4b_sft_config,
+    nemotronh_8b_peft_config,
+    nemotronh_8b_pretrain_config,
+    nemotronh_8b_sft_config,
+    nemotronh_47b_peft_config,
+    nemotronh_47b_pretrain_config,
+    nemotronh_47b_sft_config,
+    nemotronh_56b_peft_config,
+    nemotronh_56b_pretrain_config,
+    nemotronh_56b_sft_config,
+)
+
+
+__all__ = [
+    # NemotronH models
+    "nemotronh_4b_pretrain_config",
+    "nemotronh_8b_pretrain_config",
+    "nemotronh_47b_pretrain_config",
+    "nemotronh_56b_pretrain_config",
+    "nemotronh_4b_sft_config",
+    "nemotronh_8b_sft_config",
+    "nemotronh_47b_sft_config",
+    "nemotronh_56b_sft_config",
+    "nemotronh_4b_peft_config",
+    "nemotronh_8b_peft_config",
+    "nemotronh_47b_peft_config",
+    "nemotronh_56b_peft_config",
+    # Nemotron Nano v2 models
+    "nemotron_nano_9b_v2_pretrain_config",
+    "nemotron_nano_12b_v2_pretrain_config",
+    "nemotron_nano_9b_v2_sft_config",
+    "nemotron_nano_12b_v2_sft_config",
+    "nemotron_nano_9b_v2_peft_config",
+    "nemotron_nano_12b_v2_peft_config",
+    # Nemotron 3 Nano and Nemotron 3.5 Lightning models
+    "nemotron_3_5_lightning_peft_config",
+    "nemotron_3_5_lightning_pretrain_8k_config",
+    "nemotron_3_5_lightning_pretrain_8k_fsdp_config",
+    "nemotron_3_5_lightning_pretrain_config",
+    "nemotron_3_5_lightning_sft_config",
+    "nemotron_3_5_lightning_sft_openmathinstruct2_packed_config",
+    "nemotron_3_5_lightning_sft_openmathinstruct2_packed_tp1_config",
+    "nemotron_3_nano_pretrain_config",
+    "nemotron_3_nano_sft_config",
+    "nemotron_3_nano_peft_config",
+    "nemotron_3_nano_gb200_pretrain_config",
+    "nemotron_3_nano_pretrain_8gpu_gb200_bf16_config",
+    # Nemotron 3 Nano 4B model
+    "nemotron_3_nano_4b_pretrain_config",
+    "nemotron_3_nano_4b_sft_config",
+    "nemotron_3_nano_4b_sft_32k_config",
+    "nemotron_3_nano_4b_peft_config",
+    # Nemotron 3 Super models
+    "nemotron_3_super_pretrain_64gpu_gb200_bf16_config",
+    "nemotron_3_super_pretrain_config",
+    "nemotron_3_super_sft_config",
+    "nemotron_3_super_peft_config",
+    # Nemotron 3 Ultra models
+    "nemotron_3_ultra_pretrain_config",
+    "nemotron_3_ultra_sft_openmathinstruct2_packed_config",
+    "nemotron_3_ultra_peft_openmathinstruct2_packed_config",
+]

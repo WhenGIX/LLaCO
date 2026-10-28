@@ -1,0 +1,316 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+from typing import Dict, Mapping, Optional, Tuple, Union
+
+import torch
+import torch.nn as nn
+from megatron.core.models.gpt.gpt_model import GPTModel
+from transformers import GptOssForCausalLM
+
+from megatron.bridge.models.conversion.mapping_registry import MegatronMappingRegistry
+from megatron.bridge.models.conversion.model_bridge import MegatronModelBridge
+from megatron.bridge.models.conversion.param_mapping import (
+    AutoMapping,
+    QKVMapping,
+    _align_expert_weight_to_shape,
+)
+from megatron.bridge.models.conversion.quantization_utils import dequantize_mxfp4 as _dequantize_mxfp4
+from megatron.bridge.models.conversion.utils import get_module_and_param_from_name
+from megatron.bridge.models.gpt_provider import GPTModelProvider
+from megatron.bridge.models.hf_pretrained.causal_lm import PreTrainedCausalLM
+from megatron.bridge.utils.common_utils import extract_expert_number_from_param
+
+
+try:
+    from megatron.core.fusions.fused_bias_geglu import quick_gelu
+except ImportError:
+    # Fallback if fused_bias_geglu is not available
+    quick_gelu = torch.nn.functional.gelu
+
+
+@MegatronModelBridge.register_bridge(source=GptOssForCausalLM, target=GPTModel, model_type="gpt_oss")
+class GPTOSSBridge(MegatronModelBridge):
+    """
+    Megatron Hub Bridge for GPT-OSS models.
+
+    As a user you would not use this bridge directly, but through `AutoBridge`.
+
+    Example:
+        >>> from megatron.bridge import AutoBridge
+        >>> bridge = AutoBridge.from_hf_pretrained("openai/gpt-oss-model")
+        >>> provider = bridge.to_megatron_provider()
+    """
+
+    def provider_bridge(self, hf_pretrained: PreTrainedCausalLM) -> GPTModelProvider:
+        """Convert HuggingFace config to GPTModelProvider."""
+        provider = super().provider_bridge(hf_pretrained)
+
+        provider.normalization = "RMSNorm"
+        provider.gated_linear_unit = True
+        provider.add_bias_linear = True
+        provider.add_qkv_bias = getattr(hf_pretrained.config, "attention_bias", True)
+        provider.share_embeddings_and_output_weights = False
+        provider.position_embedding_type = "yarn"
+
+        provider.moe_router_pre_softmax = False
+        provider.moe_grouped_gemm = True
+        provider.moe_token_dispatcher_type = "alltoall"
+        provider.moe_permute_fusion = True
+        provider.moe_router_load_balancing_type = "none"
+
+        provider.bias_activation_fusion = True
+        provider.bias_dropout_fusion = False
+
+        provider.hidden_dropout = 0.0
+        provider.fp16 = False
+        provider.bf16 = True
+        provider.params_dtype = torch.bfloat16
+
+        # GPT-OSS specific activation
+        provider.activation_func = quick_gelu
+        provider.activation_func_clamp_value = 7.0
+        provider.glu_linear_offset = 1.0
+
+        provider.softmax_type = "learnable"
+        provider.window_size = (hf_pretrained.config.sliding_window - 1, 0)
+        provider.window_attn_skip_freq = 2
+
+        # GPT-OSS uses intermediate_size for MoE FFN hidden size
+        provider.moe_ffn_hidden_size = hf_pretrained.config.intermediate_size
+
+        # YARN position embedding settings (now dataclass fields on GPTModelProvider)
+        provider.yarn_rotary_scaling_factor = 32.0
+        provider.yarn_original_max_position_embeddings = 4096
+        provider.yarn_beta_fast = 32.0
+        provider.yarn_beta_slow = 1.0
+        provider.yarn_correction_range_round_to_int = False
+        provider.yarn_mscale = None
+        provider.yarn_mscale_all_dim = None
+
+        return provider
+
+    @classmethod
+    def megatron_to_hf_config(cls, provider) -> dict:
+        """Convert Megatron provider config to a GPT-OSS Hugging Face config."""
+        hf_config = super().megatron_to_hf_config(provider)
+        hf_config["attention_bias"] = True
+        return hf_config
+
+    def maybe_modify_loaded_hf_weight(
+        self, hf_param: str | dict[str, str], hf_state_dict: Mapping[str, torch.Tensor]
+    ) -> torch.Tensor:
+        """Load weights from HuggingFace state dict with MXFP4 dequantization support.
+
+        Per-expert ``down_proj`` is square for GPT-OSS-20B/120B (hidden == intermediate), so
+        the bridge cannot auto-detect orientation from shape alone. BF16 checkpoints (e.g.
+        ``unsloth/gpt-oss-20b-BF16``, and what ``transformers.GptOssForCausalLM`` produces at
+        init) store it as ``[E, intermediate, hidden]``, matching ``gate_up_proj``'s
+        ``[E, hidden, 2*intermediate]`` convention. MXFP4-dequantized weights come out as
+        ``[E, hidden, intermediate]``. Megatron's TE ``RowParallelGroupedLinear`` expects
+        per-expert ``(hidden, intermediate)``, so the BF16 path needs a transpose here while
+        the MXFP4 path is already aligned. Without this, BF16 imports silently store down_proj
+        in the wrong orientation and inference is broken.
+
+        gate_up_proj is handled directly in GPTOSSMLPGateUpProjMapping.hf_to_megatron via
+        _align_expert_weight_to_shape, which auto-detects the orientation difference between
+        BF16 checkpoints ([num_experts, hidden, 2*intermediate]) and MXFP4-dequantized checkpoints
+        ([num_experts, 2*intermediate, hidden]).
+        """
+        if isinstance(hf_param, str):
+            if hf_param in hf_state_dict:
+                hf_weights = hf_state_dict[hf_param]
+                if hf_param.endswith(".mlp.experts.down_proj") and hf_weights.ndim == 3:
+                    cfg = self.hf_pretrained.config
+                    hidden = cfg.hidden_size
+                    intermediate = cfg.intermediate_size
+                    last2 = tuple(hf_weights.shape[-2:])
+                    if last2 == (intermediate, hidden) and intermediate != hidden:
+                        # Unambiguous BF16 layout (E, intermediate, hidden); transpose to (E, hidden, intermediate).
+                        hf_weights = hf_weights.transpose(-1, -2).contiguous()
+                    elif last2 == (hidden, intermediate) and intermediate != hidden:
+                        # Already aligned with Megatron — no-op.
+                        pass
+                    elif intermediate == hidden:
+                        # Square: HF GptOssForCausalLM init produces (E, intermediate, hidden), so a plain BF16
+                        # checkpoint is in that layout. Transpose to (E, hidden, intermediate) for Megatron.
+                        hf_weights = hf_weights.transpose(-1, -2).contiguous()
+                return hf_weights
+            blocks_key = hf_param + "_blocks"
+            scales_key = hf_param + "_scales"
+            if blocks_key in hf_state_dict and scales_key in hf_state_dict:
+                hf_weights = _dequantize_mxfp4(hf_state_dict[blocks_key], hf_state_dict[scales_key])
+                # MXFP4 dequant already emits [E, hidden, intermediate] for down_proj — leave as-is.
+                return hf_weights
+            raise KeyError(
+                f"Cannot locate weights for '{hf_param}'. Missing both de-quantized tensor and "
+                f"quantized representation (blocks='{blocks_key}', scales='{scales_key}')."
+            )
+        return {k: hf_state_dict[v] for k, v in hf_param.items()}
+
+    def mapping_registry(self) -> MegatronMappingRegistry:
+        """
+        Return MegatronMappingRegistry containing parameter mappings from HF to Megatron format.
+        Based on the GPT-OSS importer code provided.
+        """
+
+        # Dictionary maps HF parameter names -> Megatron parameter names
+        param_mappings = {
+            "model.embed_tokens.weight": "embedding.word_embeddings.weight",
+            "model.norm.weight": "decoder.final_layernorm.weight",
+            "lm_head.weight": "output_layer.weight",
+            "model.layers.*.input_layernorm.weight": "decoder.layers.*.self_attention.linear_qkv.layer_norm_weight",
+            "model.layers.*.self_attn.o_proj.bias": "decoder.layers.*.self_attention.linear_proj.bias",
+            "model.layers.*.self_attn.o_proj.weight": "decoder.layers.*.self_attention.linear_proj.weight",
+            "model.layers.*.self_attn.sinks": "decoder.layers.*.self_attention.core_attention.softmax_offset",
+            "model.layers.*.post_attention_layernorm.weight": "decoder.layers.*.pre_mlp_layernorm.weight",
+            "model.layers.*.mlp.router.bias": "decoder.layers.*.mlp.router.bias",
+            "model.layers.*.mlp.router.weight": "decoder.layers.*.mlp.router.weight",
+        }
+
+        mapping_list = []
+        # Convert each dictionary entry to AutoMapping(hf_param, megatron_param)
+        for hf_param, megatron_param in param_mappings.items():
+            mapping_list.append(AutoMapping(hf_param=hf_param, megatron_param=megatron_param))
+
+        mapping_list.extend(
+            [
+                QKVMapping(
+                    q="model.layers.*.self_attn.q_proj.weight",
+                    k="model.layers.*.self_attn.k_proj.weight",
+                    v="model.layers.*.self_attn.v_proj.weight",
+                    megatron_param="decoder.layers.*.self_attention.linear_qkv.weight",
+                ),
+                QKVMapping(
+                    q="model.layers.*.self_attn.q_proj.bias",
+                    k="model.layers.*.self_attn.k_proj.bias",
+                    v="model.layers.*.self_attn.v_proj.bias",
+                    megatron_param="decoder.layers.*.self_attention.linear_qkv.bias",
+                ),
+                # Register the de-quantized weight names. If HF model is quantized,
+                # the logic in `modify_loaded_hf_weight` will find the blocks and scales tensors.
+                # Export is always de-quantized
+                GPTOSSMLPDownProjMapping(
+                    hf_param="model.layers.*.mlp.experts.down_proj",
+                    megatron_param="decoder.layers.*.mlp.experts.linear_fc2.weight*",
+                ),
+                GPTOSSMLPDownProjMapping(
+                    hf_param="model.layers.*.mlp.experts.down_proj_bias",
+                    megatron_param="decoder.layers.*.mlp.experts.linear_fc2.bias*",
+                ),
+                GPTOSSMLPGateUpProjMapping(
+                    hf_param="model.layers.*.mlp.experts.gate_up_proj",
+                    megatron_param="decoder.layers.*.mlp.experts.linear_fc1.weight*",
+                ),
+                GPTOSSMLPGateUpProjMapping(
+                    hf_param="model.layers.*.mlp.experts.gate_up_proj_bias",
+                    megatron_param="decoder.layers.*.mlp.experts.linear_fc1.bias*",
+                ),
+                # SequentialMLP (moe_grouped_gemm=False): expert weights stored per local_expert
+                GPTOSSMLPDownProjMapping(
+                    hf_param="model.layers.*.mlp.experts.down_proj",
+                    megatron_param="decoder.layers.*.mlp.experts.local_experts.*.linear_fc2.weight",
+                ),
+                GPTOSSMLPDownProjMapping(
+                    hf_param="model.layers.*.mlp.experts.down_proj_bias",
+                    megatron_param="decoder.layers.*.mlp.experts.local_experts.*.linear_fc2.bias",
+                ),
+                GPTOSSMLPGateUpProjMapping(
+                    hf_param="model.layers.*.mlp.experts.gate_up_proj",
+                    megatron_param="decoder.layers.*.mlp.experts.local_experts.*.linear_fc1.weight",
+                ),
+                GPTOSSMLPGateUpProjMapping(
+                    hf_param="model.layers.*.mlp.experts.gate_up_proj_bias",
+                    megatron_param="decoder.layers.*.mlp.experts.local_experts.*.linear_fc1.bias",
+                ),
+            ]
+        )
+
+        return MegatronMappingRegistry(*mapping_list)
+
+
+class GPTOSSMLPDownProjMapping(AutoMapping):
+    """MLPDownProj for expert weights in GPT-OSS models."""
+
+    is_grouped_export = True
+
+    def __init__(self, megatron_param: str, hf_param: str, permute_dims: Optional[Tuple[int, ...]] = None):
+        super().__init__(megatron_param, hf_param, permute_dims)
+        self.allow_hf_name_mismatch = True
+
+    @property
+    def group_key(self) -> str:
+        return self.hf_param
+
+    def hf_to_megatron(self, hf_weights: torch.Tensor, megatron_module: nn.Module) -> torch.Tensor:
+        global_expert_number = extract_expert_number_from_param(self.megatron_param)
+        return super().hf_to_megatron(hf_weights[global_expert_number], megatron_module)
+
+    def megatron_to_hf(self, megatron_weights: torch.Tensor, megatron_module: nn.Module) -> Dict[str, torch.Tensor]:
+        # Megatron stores per-expert weight as (hidden, intermediate); HF down_proj
+        # weight is (E, intermediate, hidden). Transpose the last two dims so the
+        # grouped-export stack assembles in HF's layout. Under EP the parent's gather
+        # may have already cat'd across the EP group, producing a 3D (ep_size, out, in)
+        # tensor — handle that too. The bias has no orientation to align (per-expert
+        # 1-D, stacked to (E, hidden) on export), so leave bias mappings untouched.
+        if megatron_weights is not None:
+            megatron_weights = megatron_weights.contiguous()
+        result = super().megatron_to_hf(megatron_weights, megatron_module)
+        if self.hf_param.endswith("_bias"):
+            return result
+        return {k: v.transpose(-1, -2).contiguous() if v.ndim >= 2 else v for k, v in result.items()}
+
+
+class GPTOSSMLPGateUpProjMapping(AutoMapping):
+    """MLPGateUpProj for expert weights in GPT-OSS models.
+
+    GPT-OSS uses alternating row interleaving for gate/up projections.
+    """
+
+    is_grouped_export = True
+
+    def __init__(self, megatron_param: str, hf_param: str, permute_dims: Optional[Tuple[int, ...]] = None):
+        super().__init__(megatron_param, hf_param, permute_dims)
+        self.allow_hf_name_mismatch = True
+
+    @property
+    def group_key(self) -> str:
+        return self.hf_param
+
+    @staticmethod
+    def _interleave(gate_up_proj):
+        return torch.cat((gate_up_proj[::2, ...], gate_up_proj[1::2, ...]), dim=0)
+
+    def _uninterleave(self, elem):
+        gate, up = torch.chunk(elem, 2, dim=0)
+        output = torch.empty_like(elem)
+        output[::2, ...] = gate
+        output[1::2, ...] = up
+        return output
+
+    def hf_to_megatron(self, hf_weights: Union[torch.Tensor, Dict], megatron_module: nn.Module) -> torch.Tensor:
+        global_expert_number = extract_expert_number_from_param(self.megatron_param)
+        expert_weight = hf_weights[global_expert_number] if hf_weights.ndim >= 2 else hf_weights
+        normalized_param = self._normalize_expert_param_name(self.megatron_param)
+        _, target_param = get_module_and_param_from_name(megatron_module, normalized_param)
+        expert_weight = _align_expert_weight_to_shape(expert_weight, target_param.shape, "gate_up_proj")
+        return super().hf_to_megatron(self._interleave(expert_weight), megatron_module)
+
+    def megatron_to_hf(self, megatron_weights: torch.Tensor, megatron_module: nn.Module) -> Dict[str, torch.Tensor]:
+        if megatron_weights is None:
+            return super().megatron_to_hf(megatron_weights, megatron_module)
+        megatron_weights = self._uninterleave(megatron_weights)
+        if len(megatron_weights.shape) == 2:
+            megatron_weights = megatron_weights.transpose(0, 1)
+        return super().megatron_to_hf(megatron_weights.contiguous(), megatron_module)
