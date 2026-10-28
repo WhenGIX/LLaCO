@@ -19,7 +19,7 @@ Shuchen Weng
 
 <a href="https://arxiv.org/abs/2610.32604"><img src="https://img.shields.io/badge/arXiv-2610.32604-b31b1b.svg" alt="arXiv"></a>
 <a href="https://escapistmost.github.io/LLaCO/"><img src="https://img.shields.io/badge/Project-Page-0A66C2.svg" alt="Project Page"></a>
-<img src="https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Coming%20Soon-lightgrey" alt="Hugging Face">
+<a href="https://huggingface.co/escapist413/LLaCO-8B"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-LLaCO--8B-yellow" alt="Hugging Face"></a>
 
 </div>
 
